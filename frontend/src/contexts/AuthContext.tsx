@@ -1,8 +1,8 @@
 import React, { createContext, useState, ReactNode, useEffect } from 'react'
 
 interface AuthData {
-  token: string | null
-  role: string | null
+  token: string
+  role: string
 }
 
 interface AuthContextType {
@@ -11,21 +11,18 @@ interface AuthContextType {
   logout: () => void
 }
 
-export const AuthContext = createContext<AuthContextType | undefined>(undefined)
+export const AuthContext = createContext<AuthContextType | null>(null)
 
 interface Props {
   children: ReactNode
 }
 
 export const AuthProvider: React.FC<Props> = ({ children }) => {
-  const [authData, setAuthData] = useState<AuthData>({
-    token: localStorage.getItem('token'),
-    role: localStorage.getItem('role'),
+  const [authData, setAuthData] = useState<AuthData>(() => {
+    const token = localStorage.getItem('token') || ''
+    const role = localStorage.getItem('role') || ''
+    return { token, role }
   })
-
-  useEffect(() => {
-    // You can add logic to validate the token here if needed
-  }, [])
 
   const login = (token: string, role: string) => {
     localStorage.setItem('token', token)
@@ -36,7 +33,7 @@ export const AuthProvider: React.FC<Props> = ({ children }) => {
   const logout = () => {
     localStorage.removeItem('token')
     localStorage.removeItem('role')
-    setAuthData({ token: null, role: null })
+    setAuthData({ token: '', role: '' })
   }
 
   return (

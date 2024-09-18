@@ -1,23 +1,75 @@
-// routes/trainingDays.ts
-
 import { Router, Request, Response } from 'express'
 import { authMiddleware } from '../middleware/auth'
 import { authorize } from '../middleware/authorize'
 import { check, validationResult } from 'express-validator'
-import TrainingDay, { ITrainingDay } from '../models/TrainingDay'
-import Program, { IProgram } from '../models/Program'
+import Program from '../models/Program'
 import { Types } from 'mongoose'
 
-const router = Router()
+const router = Router({ mergeParams: true })
 
-// Add TrainingDay to Program
+// Add Training Day to Program
 router.post(
   '/',
   authMiddleware,
   authorize(['trainer']),
+  [check('dayNumber', 'Day number is required').isInt({ min: 1 })],
+  async (req: Request, res: Response) => {
+    // Handle validation errors
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() })
+    }
+
+    try {
+      const { programId } = req.params
+      const { dayNumber } = req.body
+      const trainerId = req.user?.id
+
+      // Verify program exists and belongs to the trainer
+      const program = await Program.findOne({ _id: programId, trainerId })
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
+      }
+
+      // Check if dayNumber already exists
+      if (program.trainingDays.some((day) => day.dayNumber === dayNumber)) {
+        return res.status(400).json({ error: 'Training day already exists' })
+      }
+
+      // Add new training day with a generated _id
+      const newTrainingDay = {
+        _id: new Types.ObjectId(),
+        dayNumber,
+        exercises: [],
+      }
+
+      program.trainingDays.push(newTrainingDay)
+
+      await program.save()
+
+      res.status(201).json({
+        message: 'Training day added to program',
+        trainingDay: newTrainingDay,
+      })
+    } catch (error) {
+      console.error(error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+// Update Training Day
+router.put(
+  '/:trainingDayId',
+  authMiddleware,
+  authorize(['trainer']),
   [
-    check('programId', 'Program ID is required').notEmpty(),
-    check('dayNumber', 'Day number is required').isInt({ min: 1 }),
+    check('dayNumber')
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage('Day number must be at least 1'),
   ],
   async (req: Request, res: Response) => {
     // Handle validation errors
@@ -27,115 +79,149 @@ router.post(
     }
 
     try {
-      const { programId, dayNumber } = req.body
+      const { programId, trainingDayId } = req.params
+      const { dayNumber } = req.body
       const trainerId = req.user?.id
 
       // Verify program exists and belongs to the trainer
-      const program = (await Program.findOne({
-        _id: programId,
-        trainerId,
-      })) as IProgram
+      const program = await Program.findOne({ _id: programId, trainerId })
       if (!program) {
         return res.status(404).json({ error: 'Program not found' })
       }
 
-      // Create new training day
-      const trainingDay = new TrainingDay({
-        programId,
-        dayNumber,
-      }) as ITrainingDay
+      // Find the training day by _id using the 'id' method
+      const trainingDay = program.trainingDays.id(trainingDayId)
 
-      await trainingDay.save()
+      if (!trainingDay) {
+        return res.status(404).json({ error: 'Training day not found' })
+      }
 
-      // Add training day to program
-      program.trainingDays.push(trainingDay._id as Types.ObjectId)
+      // Update training day
+      if (dayNumber) {
+        // Check if new dayNumber already exists in another training day
+        if (
+          program.trainingDays.some(
+            (day) =>
+              day.dayNumber === dayNumber &&
+              day._id.toString() !== trainingDayId
+          )
+        ) {
+          return res.status(400).json({
+            error: 'Training day with this number already exists',
+          })
+        }
+        trainingDay.dayNumber = dayNumber
+      }
+
       await program.save()
 
-      res
-        .status(201)
-        .json({ message: 'Training day added to program', trainingDay })
+      res.json({ message: 'Training day updated successfully', trainingDay })
     } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
+      console.error(error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
     }
   }
 )
 
-// Remove TrainingDay from Program
-// router.delete(
-//   '/:trainingDayId',
-//   authMiddleware,
-//   authorize(['trainer']),
-//   async (req: Request, res: Response) => {
-//     try {
-//       const { trainingDayId } = req.params
-//       const trainerId = req.user?.id
-
-//       // Find training day
-//       const trainingDay = (await TrainingDay.findById(
-//         trainingDayId
-//       )) as ITrainingDay
-//       if (!trainingDay) {
-//         return res.status(404).json({ error: 'Training day not found' })
-//       }
-
-//       // Verify program belongs to trainer
-//       const program = (await Program.findOne({
-//         _id: trainingDay.programId,
-//         trainerId,
-//       })) as IProgram
-//       if (!program) {
-//         return res.status(403).json({ error: 'Access denied' })
-//       }
-
-//       // Remove training day from program
-//       program.trainingDays = program.trainingDays.filter(
-//         (id) => id.toString() !== trainingDayId
-//       )
-//       await program.save()
-
-//       // Remove training day
-//       await TrainingDay.findByIdAndDelete(trainingDayId)
-
-//       res.json({ message: 'Training day removed from program' })
-//     } catch (error) {
-//       const err = error as Error
-//       res.status(500).json({ error: 'Server error', details: err.message })
-//     }
-//   }
-// )
-
-// Delete TrainingDay
+// Delete Training Day
 router.delete(
   '/:trainingDayId',
   authMiddleware,
   authorize(['trainer']),
   async (req: Request, res: Response) => {
     try {
-      const { trainingDayId } = req.params
+      const { programId, trainingDayId } = req.params
       const trainerId = req.user?.id
 
-      // Find training day and verify ownership
-      const trainingDay = (await TrainingDay.findById(trainingDayId).populate<{
-        programId: IProgram
-      }>('programId')) as ITrainingDay & { programId: IProgram }
-
-      if (
-        !trainingDay ||
-        trainingDay.programId.trainerId.toString() !== trainerId
-      ) {
-        return res.status(403).json({ error: 'Access denied' })
+      // Verify program exists and belongs to the trainer
+      const program = await Program.findOne({ _id: programId, trainerId })
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
       }
 
-      // Delete the training day (will trigger cascade deletion)
-      await trainingDay.deleteOne()
+      // Check if the training day exists
+      const trainingDayExists = program.trainingDays.id(trainingDayId)
+      if (!trainingDayExists) {
+        return res.status(404).json({ error: 'Training day not found' })
+      }
 
-      res.json({
-        message: 'Training day and associated data deleted successfully',
-      })
+      // Remove training day using pull()
+      program.trainingDays.pull({ _id: trainingDayId })
+
+      await program.save()
+
+      res.json({ message: 'Training day deleted successfully' })
     } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
+      console.error(error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+router.get(
+  '/',
+  authMiddleware,
+  authorize(['trainer']),
+  async (req: Request, res: Response) => {
+    try {
+      const { programId } = req.params
+      const trainerId = req.user?.id
+
+      // Verify program exists and belongs to the trainer
+      const program = await Program.findOne({
+        _id: programId,
+        trainerId: new Types.ObjectId(trainerId),
+      })
+
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
+      }
+
+      res.json({ trainingDays: program.trainingDays })
+    } catch (error) {
+      console.error('Error fetching training days:', error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+router.get(
+  '/:trainingDayId',
+  authMiddleware,
+  authorize(['trainer']),
+  async (req: Request, res: Response) => {
+    try {
+      const { programId, trainingDayId } = req.params
+      const trainerId = req.user?.id
+
+      // Verify program exists and belongs to the trainer
+      const program = await Program.findOne({
+        _id: programId,
+        trainerId: new Types.ObjectId(trainerId),
+      })
+
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
+      }
+
+      const trainingDay = program.trainingDays.id(trainingDayId)
+
+      if (!trainingDay) {
+        return res.status(404).json({ error: 'Training day not found' })
+      }
+
+      res.json({ trainingDay })
+    } catch (error) {
+      console.error('Error fetching training day:', error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
     }
   }
 )

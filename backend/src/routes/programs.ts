@@ -1,11 +1,9 @@
-// routes/programs.ts
-
 import { Router, Request, Response } from 'express'
 import { authMiddleware } from '../middleware/auth'
 import { authorize } from '../middleware/authorize'
 import { check, validationResult } from 'express-validator'
-import Program, { IProgram } from '../models/Program'
-import User, { IUser } from '../models/User'
+import Program from '../models/Program'
+import User from '../models/User'
 import { Types } from 'mongoose'
 
 const router = Router()
@@ -30,13 +28,16 @@ router.post(
       const program = new Program({
         trainerId,
         programName,
-      }) as IProgram
+        trainingDays: [], // Initialize with an empty array
+        assignedUsers: [],
+      })
 
       await program.save()
       res.status(201).json({ message: 'Program created successfully', program })
     } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
     }
   }
 )
@@ -60,16 +61,16 @@ router.post(
       const trainerId = req.user?.id
 
       // Verify program exists and belongs to the trainer
-      const program = (await Program.findOne({
+      const program = await Program.findOne({
         _id: programId,
         trainerId,
-      })) as IProgram
+      })
       if (!program) {
         return res.status(404).json({ error: 'Program not found' })
       }
 
       // Verify user exists
-      const user = (await User.findById(userId)) as IUser
+      const user = await User.findById(userId)
       if (!user) {
         return res.status(404).json({ error: 'User not found' })
       }
@@ -83,42 +84,14 @@ router.post(
 
       res.json({ message: 'Program assigned to user', program })
     } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
     }
   }
 )
 
-// Delete Program
-router.delete(
-  '/:programId',
-  authMiddleware,
-  authorize(['trainer']),
-  async (req: Request, res: Response) => {
-    try {
-      const { programId } = req.params
-      const trainerId = req.user?.id
-
-      // Verify program exists and belongs to the trainer
-      const program = (await Program.findOne({
-        _id: programId,
-        trainerId,
-      })) as IProgram
-      if (!program) {
-        return res.status(404).json({ error: 'Program not found' })
-      }
-
-      // Delete the program
-      await program.deleteOne()
-
-      res.json({ message: 'Program deleted successfully' })
-    } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
-    }
-  }
-)
-
+// Update Program
 router.put(
   '/:programId',
   authMiddleware,
@@ -142,14 +115,13 @@ router.put(
       const trainerId = req.user?.id
 
       // Verify program exists and belongs to the trainer
-      const program = (await Program.findOne({
+      const program = await Program.findOne({
         _id: programId,
         trainerId,
-      })) as IProgram
+      })
       if (!program) {
         return res.status(404).json({ error: 'Program not found' })
       }
-
       // Update program details
       if (programName) {
         program.programName = programName
@@ -159,8 +131,86 @@ router.put(
 
       res.json({ message: 'Program updated successfully', program })
     } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+// Delete Program
+router.delete(
+  '/:programId',
+  authMiddleware,
+  authorize(['trainer']),
+  async (req: Request, res: Response) => {
+    try {
+      const { programId } = req.params
+      const trainerId = req.user?.id
+
+      // Verify program exists and belongs to the trainer
+      const program = await Program.findOne({
+        _id: programId,
+        trainerId,
+      })
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
+      }
+
+      // Delete the program
+      await program.deleteOne()
+
+      res.json({ message: 'Program deleted successfully' })
+    } catch (error) {
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+router.get(
+  '/',
+  authMiddleware,
+  authorize(['trainer']),
+  async (req: Request, res: Response) => {
+    try {
+      const trainerId = req.user?.id
+
+      // Fetch programs where the trainerId matches the authenticated user's ID
+      const programs = await Program.find({ trainerId })
+
+      res.json({ programs })
+    } catch (error) {
+      console.error('Error fetching programs:', error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+router.get(
+  '/:programId',
+  authMiddleware,
+  authorize(['trainer']),
+  async (req: Request, res: Response) => {
+    try {
+      const { programId } = req.params
+      const trainerId = req.user?.id
+
+      const program = await Program.findOne({ _id: programId, trainerId })
+
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
+      }
+
+      res.json({ program })
+    } catch (error) {
+      console.error('Error fetching program:', error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
     }
   }
 )

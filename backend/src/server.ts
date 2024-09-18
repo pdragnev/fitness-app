@@ -22,9 +22,16 @@ app.use(bodyParser.json())
 
 app.use('/auth', authRoutes)
 app.use('/programs', programsRoutes)
-app.use('/trainingDays', trainingDaysRoutes)
-app.use('/exercises', exercisesRoutes)
-app.use('/sets', setsRoutes)
+app.use('/programs/:programId/trainingDays', trainingDaysRoutes)
+app.use(
+  '/programs/:programId/trainingDays/:trainingDayId/exercises',
+  exercisesRoutes
+)
+app.use(
+  '/programs/:programId/trainingDays/:trainingDayId/exercises/:exerciseId/sets',
+  setsRoutes
+)
+
 app.use('/users', usersRoutes)
 
 mongoose

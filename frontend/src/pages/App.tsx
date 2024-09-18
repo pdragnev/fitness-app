@@ -3,6 +3,9 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Login from '../components/Login'
 import Register from '../components/Register'
 import TrainerDashboard from '../components/TrainerDashboard'
+import ProgramDetails from '../components/ProgramDetails'
+import TrainingDayDetails from '../components/TrainingDayDetails'
+import ExerciseDetails from '../components/ExerciseDetails'
 import UserDashboard from '../components/UserDashboard'
 import { AuthContext } from '../contexts/AuthContext'
 
@@ -24,7 +27,7 @@ const App: React.FC = () => {
     children: JSX.Element
   }) => {
     if (authContext?.authData.role !== role) {
-      return <Navigate to="/login" />
+      return <Navigate to="/dashboard" />
     }
     return children
   }
@@ -45,6 +48,38 @@ const App: React.FC = () => {
             ) : (
               <UserDashboard />
             )}
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Trainer Routes */}
+      <Route
+        path="/programs/:programId"
+        element={
+          <ProtectedRoute>
+            <RoleBasedRoute role="trainer">
+              <ProgramDetails />
+            </RoleBasedRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/programs/:programId/trainingDays/:trainingDayId"
+        element={
+          <ProtectedRoute>
+            <RoleBasedRoute role="trainer">
+              <TrainingDayDetails />
+            </RoleBasedRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/programs/:programId/trainingDays/:trainingDayId/exercises/:exerciseId"
+        element={
+          <ProtectedRoute>
+            <RoleBasedRoute role="trainer">
+              <ExerciseDetails />
+            </RoleBasedRoute>
           </ProtectedRoute>
         }
       />

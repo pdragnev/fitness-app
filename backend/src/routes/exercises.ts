@@ -1,24 +1,18 @@
-// routes/exercises.ts
-
 import { Router, Request, Response } from 'express'
 import { authMiddleware } from '../middleware/auth'
 import { authorize } from '../middleware/authorize'
 import { check, validationResult } from 'express-validator'
-import Exercise, { IExercise } from '../models/Exercise'
-import TrainingDay, { ITrainingDay } from '../models/TrainingDay'
+import Program from '../models/Program'
 import { Types } from 'mongoose'
-import { IProgram } from '../models/Program'
 
-const router = Router()
+const router = Router({ mergeParams: true })
 
+// Add Exercise to Training Day
 router.post(
   '/',
   authMiddleware,
   authorize(['trainer']),
-  [
-    check('trainingDayId', 'TrainingDay ID is required').notEmpty(),
-    check('name', 'Exercise name is required').notEmpty(),
-  ],
+  [check('name', 'Exercise name is required').notEmpty()],
   async (req: Request, res: Response) => {
     // Handle validation errors
     const errors = validationResult(req)
@@ -27,83 +21,52 @@ router.post(
     }
 
     try {
-      const { trainingDayId, name } = req.body
+      const { programId, trainingDayId } = req.params
+      const { name } = req.body
       const trainerId = req.user?.id
 
-      // Find training day and verify it belongs to the trainer
-      const trainingDay = (await TrainingDay.findById(trainingDayId).populate<{
-        programId: IProgram
-      }>('programId')) as ITrainingDay & { programId: IProgram }
-
-      if (
-        !trainingDay ||
-        trainingDay.programId.trainerId.toString() !== trainerId
-      ) {
-        return res.status(403).json({ error: 'Access denied' })
+      // Verify program and training day
+      const program = await Program.findOne({ _id: programId, trainerId })
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
       }
 
-      // Create new exercise
-      const exercise = new Exercise({
-        trainingDayId,
+      const trainingDay = program.trainingDays.id(trainingDayId)
+
+      if (!trainingDay) {
+        return res.status(404).json({ error: 'Training day not found' })
+      }
+
+      // Check if exercise name already exists
+      if (trainingDay.exercises.some((ex) => ex.name === name)) {
+        return res.status(400).json({ error: 'Exercise already exists' })
+      }
+
+      // Add exercise with generated _id
+      const newExercise = {
+        _id: new Types.ObjectId(),
         name,
-      }) as IExercise
+        sets: [],
+      }
 
-      await exercise.save()
+      trainingDay.exercises.push(newExercise)
 
-      // Add exercise to training day
-      trainingDay.exercises.push(exercise._id as Types.ObjectId)
-      await trainingDay.save()
+      await program.save()
 
+      res.status(201).json({
+        message: 'Exercise added to training day',
+        exercise: newExercise,
+      })
+    } catch (error) {
+      console.error(error)
       res
-        .status(201)
-        .json({ message: 'Exercise added to training day', exercise })
-    } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
     }
   }
 )
 
-// Delete Exercise
-router.delete(
-  '/:exerciseId',
-  authMiddleware,
-  authorize(['trainer']),
-  async (req: Request, res: Response) => {
-    try {
-      const { exerciseId } = req.params
-      const trainerId = req.user?.id
-
-      // Find exercise and verify ownership
-      const exercise = (await Exercise.findById(exerciseId).populate<{
-        trainingDayId: ITrainingDay & { programId: IProgram }
-      }>({
-        path: 'trainingDayId',
-        populate: { path: 'programId' },
-      })) as IExercise & {
-        trainingDayId: ITrainingDay & { programId: IProgram }
-      }
-
-      if (!exercise) {
-        return res.status(404).json({ error: 'Exercise not found' })
-      }
-
-      const program = exercise.trainingDayId.programId
-      if (program.trainerId.toString() !== trainerId) {
-        return res.status(403).json({ error: 'Access denied' })
-      }
-
-      // Delete the exercise (will trigger cascade deletion of sets)
-      await exercise.deleteOne()
-
-      res.json({ message: 'Exercise and associated sets deleted successfully' })
-    } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
-    }
-  }
-)
-
+// Update Exercise
 router.put(
   '/:exerciseId',
   authMiddleware,
@@ -122,40 +85,170 @@ router.put(
     }
 
     try {
-      const { exerciseId } = req.params
+      const { programId, trainingDayId, exerciseId } = req.params
       const { name } = req.body
       const trainerId = req.user?.id
 
-      // Find exercise and verify ownership
-      const exercise = (await Exercise.findById(exerciseId).populate<{
-        trainingDayId: ITrainingDay & { programId: IProgram }
-      }>({
-        path: 'trainingDayId',
-        populate: { path: 'programId' },
-      })) as IExercise & {
-        trainingDayId: ITrainingDay & { programId: IProgram }
+      // Verify program and training day
+      const program = await Program.findOne({ _id: programId, trainerId })
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
       }
+
+      const trainingDay = program.trainingDays.id(trainingDayId)
+
+      if (!trainingDay) {
+        return res.status(404).json({ error: 'Training day not found' })
+      }
+
+      const exercise = trainingDay.exercises.id(exerciseId)
 
       if (!exercise) {
         return res.status(404).json({ error: 'Exercise not found' })
       }
 
-      const program = exercise.trainingDayId.programId
-      if (program.trainerId.toString() !== trainerId) {
-        return res.status(403).json({ error: 'Access denied' })
-      }
-
-      // Update exercise details
+      // Update exercise
       if (name) {
+        // Check if new name already exists in another exercise
+        if (
+          trainingDay.exercises.some(
+            (ex) => ex.name === name && ex._id.toString() !== exerciseId
+          )
+        ) {
+          return res.status(400).json({
+            error: 'Exercise with this name already exists',
+          })
+        }
         exercise.name = name
       }
 
-      await exercise.save()
+      await program.save()
 
       res.json({ message: 'Exercise updated successfully', exercise })
     } catch (error) {
-      const err = error as Error
-      res.status(500).json({ error: 'Server error', details: err.message })
+      console.error(error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+// Delete Exercise
+router.delete(
+  '/:exerciseId',
+  authMiddleware,
+  authorize(['trainer']),
+  async (req: Request, res: Response) => {
+    try {
+      const { programId, trainingDayId, exerciseId } = req.params
+      const trainerId = req.user?.id
+
+      // Verify program and training day
+      const program = await Program.findOne({ _id: programId, trainerId })
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
+      }
+
+      const trainingDay = program.trainingDays.id(trainingDayId)
+
+      if (!trainingDay) {
+        return res.status(404).json({ error: 'Training day not found' })
+      }
+
+      const exercise = trainingDay.exercises.id(exerciseId)
+
+      if (!exercise) {
+        return res.status(404).json({ error: 'Exercise not found' })
+      }
+
+      // Remove exercise using pull()
+      trainingDay.exercises.pull({ _id: exerciseId })
+
+      await program.save()
+
+      res.json({ message: 'Exercise deleted successfully' })
+    } catch (error) {
+      console.error(error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+router.get(
+  '/',
+  authMiddleware,
+  authorize(['trainer']),
+  async (req: Request, res: Response) => {
+    try {
+      const { programId, trainingDayId } = req.params
+      const trainerId = req.user?.id
+
+      // Verify program and training day
+      const program = await Program.findOne({
+        _id: programId,
+        trainerId: new Types.ObjectId(trainerId),
+      })
+
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
+      }
+
+      const trainingDay = program.trainingDays.id(trainingDayId)
+
+      if (!trainingDay) {
+        return res.status(404).json({ error: 'Training day not found' })
+      }
+
+      res.json({ exercises: trainingDay.exercises })
+    } catch (error) {
+      console.error('Error fetching exercises:', error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
+    }
+  }
+)
+
+router.get(
+  '/:exerciseId',
+  authMiddleware,
+  authorize(['trainer']),
+  async (req: Request, res: Response) => {
+    try {
+      const { programId, trainingDayId, exerciseId } = req.params
+      const trainerId = req.user?.id
+
+      // Verify program and training day
+      const program = await Program.findOne({
+        _id: programId,
+        trainerId: new Types.ObjectId(trainerId),
+      })
+
+      if (!program) {
+        return res.status(404).json({ error: 'Program not found' })
+      }
+
+      const trainingDay = program.trainingDays.id(trainingDayId)
+
+      if (!trainingDay) {
+        return res.status(404).json({ error: 'Training day not found' })
+      }
+
+      const exercise = trainingDay.exercises.id(exerciseId)
+
+      if (!exercise) {
+        return res.status(404).json({ error: 'Exercise not found' })
+      }
+
+      res.json({ exercise })
+    } catch (error) {
+      console.error('Error fetching exercise:', error)
+      res
+        .status(500)
+        .json({ error: 'Server error', details: (error as Error).message })
     }
   }
 )
